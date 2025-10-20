@@ -2,24 +2,41 @@ extern crate sdl3;
 
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
+use sdl3::keyboard::Scancode;
 use sdl3::pixels::Color;
-use sdl3::render::FPoint;
-use sdl3::render::FRect;
 use std::error::Error;
 use std::time::Duration;
 
+use crate::game::Game;
+use crate::game::Seed;
+
+mod game;
+
 const PIXEL_WIDTH: u32 = 800;
 const PIXEL_HEIGHT: u32 = 800;
-const BLOCK_SIZE: usize = 1;
-const WIDTH: usize = PIXEL_WIDTH as usize / BLOCK_SIZE;
-const HEIGHT: usize = PIXEL_HEIGHT as usize / BLOCK_SIZE;
+const BLOCK_SIZE: isize = 8;
+const FPS: u32 = 60;
+const TPS: u32 = 10;
+
+const WIDTH: usize = PIXEL_WIDTH as usize / BLOCK_SIZE as usize;
+const HEIGHT: usize = PIXEL_HEIGHT as usize / BLOCK_SIZE as usize;
+const FPT: u32 = FPS / TPS;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let sdl_context = sdl3::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
-    let mut grid = vec![vec![false; WIDTH]; HEIGHT];
-    seed(0, 600, 600, &mut grid);
+    let mut game = Game::new();
+    game.seed(Seed::Acorn, 46, 30);
+    game.seed(Seed::Acorn, 46, 90);
+    game.seed(Seed::BLFive, 10, 150);
+    game.seed(Seed::BLLine, 100, 130);
+    game.seed(Seed::GosperGun, 100, 10);
+
+    let mut paused: bool = true;
+    let mut i: u32 = 0;
+    let mut move_speed: isize = 1;
+    let mut offset: (isize, isize) = (0, 0);
 
     let window = video_subsystem
         .window("Conway's Game of Life", PIXEL_WIDTH, PIXEL_HEIGHT)
@@ -41,157 +58,85 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 | Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
+                }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Q),
+                    ..
                 } => break 'running Ok(()),
                 Event::KeyDown {
                     keycode: Some(Keycode::S),
                     ..
                 } => {
-                    grid = tick_game(&grid);
+                    game.tick();
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::P),
+                    ..
+                } => {
+                    paused = !paused;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::LShift),
+                    ..
+                } => {
+                    move_speed = 5;
+                }
+                Event::KeyUp {
+                    keycode: Some(Keycode::LShift),
+                    ..
+                } => {
+                    move_speed = 1;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::N),
+                    ..
+                } => {
+                    println!("There are {} live cells", game.count());
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::H),
+                    ..
+                } => {
+                    offset = (0, 0);
                 }
                 _ => {}
             }
         }
 
-        grid = tick_game(&grid);
-
-        if BLOCK_SIZE > 1 {
-            let rects = grid
-                .iter()
-                .enumerate()
-                .flat_map(|(row, i)| {
-                    i.iter().enumerate().filter_map(move |(column, j)| {
-                        if *j {
-                            Some(FRect::new(
-                                (column * BLOCK_SIZE) as f32,
-                                (row * BLOCK_SIZE) as f32,
-                                BLOCK_SIZE as f32,
-                                BLOCK_SIZE as f32,
-                            ))
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .collect::<Vec<FRect>>();
-
-            if !rects.is_empty() {
-                canvas.set_draw_color(Color::RGB(255, 255, 255));
-                canvas.draw_rects(&rects)?;
-                canvas.set_draw_color(Color::RGB(0, 0, 0));
+        let keyboard_state = event_pump.keyboard_state();
+        for i in keyboard_state.pressed_scancodes() {
+            match i {
+                Scancode::Up => {
+                    offset.1 -= move_speed;
+                }
+                Scancode::Down => {
+                    offset.1 += move_speed;
+                }
+                Scancode::Right => {
+                    offset.0 += move_speed;
+                }
+                Scancode::Left => {
+                    offset.0 -= move_speed;
+                }
+                _ => {}
             }
-        } else {
-            let points = grid
-                .iter()
-                .enumerate()
-                .flat_map(|(row, i)| {
-                    i.iter().enumerate().filter_map(move |(column, j)| {
-                        if *j {
-                            Some(FPoint::new(column as f32, row as f32))
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .collect::<Vec<FPoint>>();
+        }
 
-            if !points.is_empty() {
-                canvas.set_draw_color(Color::RGB(255, 255, 255));
-                canvas.draw_points(points.as_slice())?;
-                canvas.set_draw_color(Color::RGB(0, 0, 0));
-            }
+        if !paused && i.is_multiple_of(FPT) {
+            game.tick();
+            i = 0;
+        }
+        i += 1;
+
+        let rects = game.get_rects(offset);
+
+        if !rects.is_empty() {
+            canvas.set_draw_color(Color::RGB(255, 255, 255));
+            canvas.draw_rects(&rects)?;
+            canvas.set_draw_color(Color::RGB(0, 0, 0));
         }
 
         canvas.present();
-        std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+        std::thread::sleep(Duration::new(0, 1_000_000_000u32 / FPS));
     }
-}
-
-fn seed(kind: u8, x: usize, y: usize, grid: &mut Vec<Vec<bool>>) {
-    match kind {
-        0 => {
-            grid[y][x] = true;
-            grid[1 + y][x] = true;
-            grid[4 + y][x] = true;
-            grid[y][1 + x] = true;
-            grid[3 + y][1 + x] = true;
-            grid[y][2 + x] = true;
-            grid[3 + y][2 + x] = true;
-            grid[4 + y][2 + x] = true;
-            grid[2 + y][3 + x] = true;
-            grid[y][4 + x] = true;
-            grid[2 + y][4 + x] = true;
-            grid[3 + y][4 + x] = true;
-            grid[4 + y][4 + x] = true;
-        }
-        1 => {
-            grid[y][x] = true;
-            grid[1 + y][x] = true;
-            grid[2 + y][x] = true;
-            grid[3 + y][x] = true;
-            grid[4 + y][x] = true;
-            grid[5 + y][x] = true;
-            grid[6 + y][x] = true;
-            grid[7 + y][x] = true;
-            grid[y][2 + x] = true;
-            grid[1 + y][2 + x] = true;
-            grid[2 + y][2 + x] = true;
-            grid[3 + y][2 + x] = true;
-            grid[4 + y][2 + x] = true;
-            grid[5 + y][2 + x] = true;
-            grid[6 + y][2 + x] = true;
-            grid[7 + y][2 + x] = true;
-            grid[y][1 + x] = true;
-            grid[2 + y][1 + x] = true;
-            grid[3 + y][1 + x] = true;
-            grid[4 + y][1 + x] = true;
-            grid[5 + y][1 + x] = true;
-            grid[7 + y][1 + x] = true;
-        }
-        2 => {
-            grid[y][x] = true;
-            grid[1 + y][x] = true;
-            grid[2 + y][x] = true;
-        }
-        _ => {}
-    }
-}
-
-fn tick_game(grid: &[Vec<bool>]) -> Vec<Vec<bool>> {
-    let directions: [(i32, i32); 8] = [
-        (0, 1),
-        (1, 0),
-        (0, -1),
-        (-1, 0),
-        (1, 1),
-        (-1, -1),
-        (1, -1),
-        (-1, 1),
-    ];
-    (0..HEIGHT)
-        .map(|i| {
-            (0..WIDTH)
-                .map(|j| {
-                    let neighbours = directions.iter().fold(0, |acc, k| {
-                        let row = (i as i32 + k.0) as usize;
-                        let column = (j as i32 + k.1) as usize;
-                        if 0 < row
-                            && row < HEIGHT
-                            && 0 < column
-                            && column < WIDTH
-                            && grid[row][column]
-                        {
-                            acc + 1
-                        } else {
-                            acc
-                        }
-                    });
-                    if grid[i][j] {
-                        (2..=3).contains(&neighbours)
-                    } else {
-                        neighbours == 3
-                    }
-                })
-                .collect::<Vec<bool>>()
-        })
-        .collect::<Vec<Vec<bool>>>()
 }
