@@ -1,20 +1,19 @@
 extern crate sdl3;
 
-use sdl3::event::Event;
-use sdl3::keyboard::Keycode;
-use sdl3::keyboard::Scancode;
-use sdl3::pixels::Color;
 use std::error::Error;
 use std::time::Duration;
 
-use crate::game::Game;
-use crate::game::Seed;
+use sdl3::event::Event;
+use sdl3::keyboard::{Keycode, Scancode};
+use sdl3::pixels::Color;
+
+use crate::game::{Game, Seed};
 
 mod game;
 
-const PIXEL_WIDTH: u32 = 800;
-const PIXEL_HEIGHT: u32 = 800;
-const BLOCK_SIZE: isize = 8;
+const PIXEL_WIDTH: u32 = 1000;
+const PIXEL_HEIGHT: u32 = 1000;
+const BLOCK_SIZE: i8 = 1;
 const FPS: u32 = 60;
 const TPS: u32 = 10;
 
@@ -26,17 +25,28 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let sdl_context = sdl3::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
-    let mut game = Game::new();
+    let mut game = Game::<i16>::new();
     game.seed(Seed::Acorn, 46, 30);
     game.seed(Seed::Acorn, 46, 90);
+    game.seed(Seed::Acorn, 200, 200);
+    game.seed(Seed::Acorn, 250, 150);
     game.seed(Seed::BLFive, 10, 150);
     game.seed(Seed::BLLine, 100, 130);
     game.seed(Seed::GosperGun, 100, 10);
+    game.seed(Seed::PentaDecathlon, 75, 40);
+    game.seed(Seed::Blinker, 5, 5);
+    for i in (-750..-250).step_by(50) {
+        game.seed(Seed::GosperGun, i as i16, -500);
+    }
+    for i in (-5750..-5250).step_by(50) {
+        game.seed(Seed::GosperGun, i as i16, -5500);
+    }
 
     let mut paused: bool = true;
+    let mut turbo: bool = false;
     let mut i: u32 = 0;
-    let mut move_speed: isize = 1;
-    let mut offset: (isize, isize) = (0, 0);
+    let mut move_speed: i16 = 1;
+    let mut offset: (i16, i16) = (0, 0);
 
     let window = video_subsystem
         .window("Conway's Game of Life", PIXEL_WIDTH, PIXEL_HEIGHT)
@@ -76,6 +86,12 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                     paused = !paused;
                 }
                 Event::KeyDown {
+                    keycode: Some(Keycode::T),
+                    ..
+                } => {
+                    turbo = !turbo;
+                }
+                Event::KeyDown {
                     keycode: Some(Keycode::LShift),
                     ..
                 } => {
@@ -91,7 +107,12 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                     keycode: Some(Keycode::N),
                     ..
                 } => {
-                    println!("There are {} live cells", game.count());
+                    println!(
+                        "There are {} live cells, the camera origin ({}, {}), ",
+                        game.count(),
+                        offset.0,
+                        offset.1
+                    );
                 }
                 Event::KeyDown {
                     keycode: Some(Keycode::H),
@@ -128,7 +149,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
         i += 1;
 
-        let rects = game.get_rects(offset);
+        let rects = game.get_rects(offset, (WIDTH as i16, HEIGHT as i16));
 
         if !rects.is_empty() {
             canvas.set_draw_color(Color::RGB(255, 255, 255));
@@ -137,6 +158,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
 
         canvas.present();
-        std::thread::sleep(Duration::new(0, 1_000_000_000u32 / FPS));
+        if !turbo {
+            std::thread::sleep(Duration::new(0, 1_000_000_000u32 / FPS));
+        }
     }
 }
